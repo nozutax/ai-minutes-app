@@ -19,18 +19,27 @@
         #status { font-weight: bold; color: #4285f4; margin-top: 10px; }
         .error { color: #ea4335; }
         .note { font-size: 0.9em; color: #666; }
+        /* チェックボックス用のスタイル追加 */
+        .checkbox-label { font-weight: normal; font-size: 0.95em; cursor: pointer; display: flex; align-items: center; }
+        .checkbox-label input { width: auto; margin-right: 8px; margin-bottom: 0; }
     </style>
 </head>
 <body>
 
-    <!-- タイトル: シンプルにGeminiのみ -->
     <h1>AI議事録アプリ (Gemini)</h1>
 
     <!-- APIキー入力 -->
     <div class="section">
         <label>Gemini API Keyを入力してください:</label>
         <input type="password" id="apiKey" placeholder="AIza..." value="">
-        <p class="note">※キーはブラウザ内でのみ使用され、外部サーバーには保存されません。</p>
+        
+        <!-- ▼▼▼ 保存用チェックボックスを追加 ▼▼▼ -->
+        <label class="checkbox-label">
+            <input type="checkbox" id="saveKeyCheckbox"> 次回から自動入力する
+        </label>
+        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
+        
+        <p class="note" style="margin-top:10px;">※キーはブラウザ内でのみ使用・保存され、外部サーバーには送信されません。</p>
     </div>
 
     <!-- 1. 録音 -->
@@ -58,10 +67,17 @@
     <script>
         let mediaRecorder;
         let audioChunks = [];
-        
-        // ▼▼▼ モデル設定 ▼▼▼
-        // ご指定の gemini-2.5-pro を設定
         const MODEL_NAME = "gemini-2.5-pro";
+
+        // ▼▼▼ ページ読み込み時に保存されたキーを復元 ▼▼▼
+        window.addEventListener('load', () => {
+            const savedKey = localStorage.getItem('gemini_api_key');
+            if (savedKey) {
+                document.getElementById('apiKey').value = savedKey;
+                document.getElementById('saveKeyCheckbox').checked = true;
+            }
+        });
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
         // 録音開始
         async function startRecording() {
@@ -70,6 +86,15 @@
                 alert("先にGemini API Keyを入力してください");
                 return;
             }
+
+            // ▼▼▼ キーの保存処理 ▼▼▼
+            const shouldSave = document.getElementById('saveKeyCheckbox').checked;
+            if (shouldSave) {
+                localStorage.setItem('gemini_api_key', apiKey);
+            } else {
+                localStorage.removeItem('gemini_api_key');
+            }
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -103,13 +128,10 @@
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
             const apiKey = document.getElementById('apiKey').value;
 
-            // 表示は「Gemini」のみに統一
             updateStatus("Gemini に送信中...（解析中）", true);
 
             try {
-                // BlobをBase64に変換
                 const base64Audio = await blobToBase64(audioBlob);
-                // "data:audio/webm;base64," のプレフィックスを削除
                 const cleanBase64 = base64Audio.split(',')[1];
 
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
@@ -117,7 +139,6 @@
                 const payload = {
                     contents: [{
                         parts: [
-                            // ▼▼▼ 指定された逐語起こしのプロンプト ▼▼▼
                             { text: `あなたは熟練した文字起こし担当者です。
 添付の音声データの内容を、一言一句省略せずに（逐語起こしで）書き出してください。
 
@@ -125,7 +146,6 @@
 ・「あー」「えっと」などの言い淀みや、言い間違いも含めて、聞こえた通りにすべて文字にしてください。
 ・話者の感情や調子（笑いながら、怒って、など）が分かる場合は、（笑）や（怒）のように注釈を入れてください。
 ・話者が切り替わるタイミングは明確に段落を分けてください。` },
-                            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                             {
                                 inline_data: {
                                     mime_type: "audio/webm",
@@ -148,7 +168,6 @@
                     throw new Error(data.error.message);
                 }
 
-                // 結果の抽出
                 if (data.candidates && data.candidates[0].content) {
                      const transcript = data.candidates[0].content.parts[0].text;
                      document.getElementById('transcriptionText').value = transcript;
@@ -219,7 +238,6 @@
             }
         }
 
-        // Helper: Blob to Base64
         function blobToBase64(blob) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();

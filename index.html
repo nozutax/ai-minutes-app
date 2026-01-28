@@ -10,10 +10,14 @@
         .section { background: #f9f9f9; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ddd; }
         label { font-weight: bold; display: block; margin-bottom: 5px; }
         input[type="password"] { width: 100%; padding: 10px; margin-bottom: 10px; box-sizing: border-box; }
-        button { padding: 10px 20px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; color: white; margin-right: 10px; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; color: white; margin-right: 10px; margin-bottom: 10px; }
+        
+        /* ボタンの色定義 */
         .btn-blue { background-color: #4285f4; }
         .btn-red { background-color: #ea4335; }
         .btn-green { background-color: #34a853; }
+        .btn-orange { background-color: #f6851b; } /* ダウンロード用 */
+        
         button:disabled { background-color: #ccc; cursor: not-allowed; }
         textarea { width: 100%; height: 150px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; margin-top: 10px; }
         #status { font-weight: bold; color: #4285f4; margin-top: 10px; }
@@ -53,18 +57,25 @@
         <textarea id="transcriptionText" placeholder="ここに文字起こし結果が表示されます..."></textarea>
         <br><br>
         <button id="summarizeBtn" class="btn-green" onclick="generateMinutes()" disabled>この内容で議事録を作成</button>
+        <!-- ▼▼▼ 文字起こしダウンロードボタンを追加 ▼▼▼ -->
+        <button id="dlTransBtn" class="btn-orange" onclick="downloadText('transcriptionText', 'transcription')" disabled>文字起こしをダウンロード</button>
+        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
     </div>
 
     <!-- 3. 結果 -->
     <div class="section">
         <h2>3. 議事録出力</h2>
         <textarea id="minutesText" placeholder="ここに議事録が出力されます..." readonly></textarea>
+        <br><br>
+        <!-- ▼▼▼ 議事録ダウンロードボタンを追加 ▼▼▼ -->
+        <button id="dlMinutesBtn" class="btn-orange" onclick="downloadText('minutesText', 'minutes')" disabled>議事録をダウンロード</button>
+        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
     </div>
 
     <script>
         let mediaRecorder;
         let audioChunks = [];
-        let stream; // マイクの接続状態を管理する変数
+        let stream; 
         const MODEL_NAME = "gemini-2.5-pro";
 
         // ページ読み込み時に保存されたキーを復元
@@ -97,6 +108,10 @@
                 document.getElementById('transcriptionText').value = "";
                 document.getElementById('minutesText').value = "";
                 
+                // ダウンロードボタンを無効化（リセット）
+                document.getElementById('dlTransBtn').disabled = true;
+                document.getElementById('dlMinutesBtn').disabled = true;
+
                 // 配列をリセット
                 audioChunks = [];
 
@@ -128,8 +143,7 @@
                 mediaRecorder.stop();
             }
 
-            // 【重要】マイクのストリームを完全に停止して解放する
-            // これにより、2回目の録音が可能になります
+            // マイクのストリームを完全に停止して解放する
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
@@ -187,7 +201,11 @@
                 if (data.candidates && data.candidates[0].content) {
                      const transcript = data.candidates[0].content.parts[0].text;
                      document.getElementById('transcriptionText').value = transcript;
+                     
+                     // ボタン有効化
                      document.getElementById('summarizeBtn').disabled = false;
+                     document.getElementById('dlTransBtn').disabled = false; // ダウンロードボタン有効化
+                     
                      updateStatus("文字起こし完了。", false);
                 } else {
                      throw new Error("Geminiからの応答が空でした。録音が短すぎるか、音声が認識されませんでした。");
@@ -245,6 +263,10 @@
 
                 const summary = data.candidates[0].content.parts[0].text;
                 document.getElementById('minutesText').value = summary;
+                
+                // 議事録ダウンロードボタン有効化
+                document.getElementById('dlMinutesBtn').disabled = false;
+
                 updateStatus("議事録作成完了！", false);
 
             } catch (error) {
@@ -253,6 +275,35 @@
                 document.getElementById('summarizeBtn').disabled = false;
             }
         }
+
+        // ▼▼▼ テキストファイルダウンロード機能 ▼▼▼
+        function downloadText(elementId, filePrefix) {
+            const text = document.getElementById(elementId).value;
+            if (!text) {
+                alert("ダウンロードする内容がありません。");
+                return;
+            }
+
+            // 日時を取得してファイル名にする (例: transcription_20231010_120000.txt)
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            const timestamp = `${year}${month}${day}_${hours}${minutes}${seconds}`;
+
+            const filename = `${filePrefix}_${timestamp}.txt`;
+
+            const blob = new Blob([text], { type: "text/plain" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
         function blobToBase64(blob) {
             return new Promise((resolve, reject) => {

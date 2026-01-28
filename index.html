@@ -16,7 +16,7 @@
         .btn-blue { background-color: #4285f4; }
         .btn-red { background-color: #ea4335; }
         .btn-green { background-color: #34a853; }
-        .btn-orange { background-color: #f6851b; } /* ダウンロード用 */
+        .btn-orange { background-color: #f6851b; }
         
         button:disabled { background-color: #ccc; cursor: not-allowed; }
         textarea { width: 100%; height: 150px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; margin-top: 10px; }
@@ -57,9 +57,7 @@
         <textarea id="transcriptionText" placeholder="ここに文字起こし結果が表示されます..."></textarea>
         <br><br>
         <button id="summarizeBtn" class="btn-green" onclick="generateMinutes()" disabled>この内容で議事録を作成</button>
-        <!-- ▼▼▼ 文字起こしダウンロードボタンを追加 ▼▼▼ -->
         <button id="dlTransBtn" class="btn-orange" onclick="downloadText('transcriptionText', 'transcription')" disabled>文字起こしをダウンロード</button>
-        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
     </div>
 
     <!-- 3. 結果 -->
@@ -67,9 +65,7 @@
         <h2>3. 議事録出力</h2>
         <textarea id="minutesText" placeholder="ここに議事録が出力されます..." readonly></textarea>
         <br><br>
-        <!-- ▼▼▼ 議事録ダウンロードボタンを追加 ▼▼▼ -->
         <button id="dlMinutesBtn" class="btn-orange" onclick="downloadText('minutesText', 'minutes')" disabled>議事録をダウンロード</button>
-        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
     </div>
 
     <script>
@@ -104,18 +100,14 @@
             }
 
             try {
-                // 前回の結果をクリア
+                // UIリセット
                 document.getElementById('transcriptionText').value = "";
                 document.getElementById('minutesText').value = "";
-                
-                // ダウンロードボタンを無効化（リセット）
                 document.getElementById('dlTransBtn').disabled = true;
                 document.getElementById('dlMinutesBtn').disabled = true;
 
-                // 配列をリセット
                 audioChunks = [];
 
-                // マイクへのアクセス取得
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream);
 
@@ -143,7 +135,6 @@
                 mediaRecorder.stop();
             }
 
-            // マイクのストリームを完全に停止して解放する
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
@@ -168,14 +159,19 @@
                 const payload = {
                     contents: [{
                         parts: [
-                            // 逐語起こしのプロンプト
+                            // ▼▼▼ プロンプト修正: 余計な返事を禁止 ▼▼▼
                             { text: `あなたは熟練した文字起こし担当者です。
 添付の音声データの内容を、一言一句省略せずに（逐語起こしで）書き出してください。
+
+【極めて重要な指示】
+・出力には、あなた（AI）からの挨拶、了解の返事、説明書き（「以下に記載します」等）は一切含めないでください。
+・音声の内容のみをいきなり出力してください。
 
 【制約事項】
 ・「あー」「えっと」などの言い淀みや、言い間違いも含めて、聞こえた通りにすべて文字にしてください。
 ・話者の感情や調子（笑いながら、怒って、など）が分かる場合は、（笑）や（怒）のように注釈を入れてください。
 ・話者が切り替わるタイミングは明確に段落を分けてください。` },
+                            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                             {
                                 inline_data: {
                                     mime_type: "audio/webm",
@@ -199,13 +195,15 @@
                 }
 
                 if (data.candidates && data.candidates[0].content) {
-                     const transcript = data.candidates[0].content.parts[0].text;
+                     let transcript = data.candidates[0].content.parts[0].text;
+                     
+                     // 念のためのトリミング（前後の改行等を削除）
+                     transcript = transcript.trim();
+                     
                      document.getElementById('transcriptionText').value = transcript;
                      
-                     // ボタン有効化
                      document.getElementById('summarizeBtn').disabled = false;
-                     document.getElementById('dlTransBtn').disabled = false; // ダウンロードボタン有効化
-                     
+                     document.getElementById('dlTransBtn').disabled = false;
                      updateStatus("文字起こし完了。", false);
                 } else {
                      throw new Error("Geminiからの応答が空でした。録音が短すぎるか、音声が認識されませんでした。");
@@ -232,7 +230,8 @@
             const prompt = `
             以下の会議の文字起こしテキストをもとに、簡潔な議事録を作成してください。
             マークダウン形式を使わず、プレーンテキストで見やすく出力してください。
-            
+            挨拶や返事は不要です。
+
             【形式】
             ・議題
             ・決定事項
@@ -263,8 +262,6 @@
 
                 const summary = data.candidates[0].content.parts[0].text;
                 document.getElementById('minutesText').value = summary;
-                
-                // 議事録ダウンロードボタン有効化
                 document.getElementById('dlMinutesBtn').disabled = false;
 
                 updateStatus("議事録作成完了！", false);
@@ -276,7 +273,6 @@
             }
         }
 
-        // ▼▼▼ テキストファイルダウンロード機能 ▼▼▼
         function downloadText(elementId, filePrefix) {
             const text = document.getElementById(elementId).value;
             if (!text) {
@@ -284,7 +280,6 @@
                 return;
             }
 
-            // 日時を取得してファイル名にする (例: transcription_20231010_120000.txt)
             const now = new Date();
             const year = now.getFullYear();
             const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -303,7 +298,6 @@
             link.click();
             URL.revokeObjectURL(link.href);
         }
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
         function blobToBase64(blob) {
             return new Promise((resolve, reject) => {

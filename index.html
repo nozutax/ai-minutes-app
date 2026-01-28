@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI議事録アプリ (Gemini 2.0 Flash)</title>
+    <title>AI議事録アプリ (Gemini)</title>
     <style>
         body { font-family: "Helvetica Neue", Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #333; }
         h1 { text-align: center; color: #4285f4; }
@@ -23,7 +23,8 @@
 </head>
 <body>
 
-    <h1>✨ AI議事録アプリ (Gemini 2.0)</h1>
+    <!-- タイトル: シンプルにGeminiのみ -->
+    <h1>AI議事録アプリ (Gemini)</h1>
 
     <!-- APIキー入力 -->
     <div class="section">
@@ -58,11 +59,9 @@
         let mediaRecorder;
         let audioChunks = [];
         
-        // ▼▼▼ ここを変更しました ▼▼▼
-        // 最新のGemini 2.0 Flash Experimentalモデルを指定
-        // (もし将来2.5が出たらここを "gemini-2.5-flash" 等に変えてください)
-        const MODEL_NAME = "gemini-2.5-pro"; 
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+        // ▼▼▼ モデル設定 ▼▼▼
+        // ご指定の gemini-2.5-pro を設定
+        const MODEL_NAME = "gemini-2.5-pro";
 
         // 録音開始
         async function startRecording() {
@@ -104,7 +103,8 @@
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
             const apiKey = document.getElementById('apiKey').value;
 
-            updateStatus("Gemini 2.0に送信中...（高速解析中）", true);
+            // 表示は「Gemini」のみに統一
+            updateStatus("Gemini に送信中...（解析中）", true);
 
             try {
                 // BlobをBase64に変換
@@ -117,7 +117,15 @@
                 const payload = {
                     contents: [{
                         parts: [
-                            { text: `あなたは熟練した文字起こし担当者です。 添付の音声データの内容を、一言一句省略せずに（逐語起こしで）書き出してください。  【制約事項】 ・「あー」「えっと」などの言い淀みや、言い間違いも含めて、聞こえた通りにすべて文字にしてください。 ・話者の感情や調子（笑いながら、怒って、など）が分かる場合は、（笑）や（怒）のように注釈を入れてください。 ・話者が切り替わるタイミングは明確に段落を分けてください。` },
+                            // ▼▼▼ 指定された逐語起こしのプロンプト ▼▼▼
+                            { text: `あなたは熟練した文字起こし担当者です。
+添付の音声データの内容を、一言一句省略せずに（逐語起こしで）書き出してください。
+
+【制約事項】
+・「あー」「えっと」などの言い淀みや、言い間違いも含めて、聞こえた通りにすべて文字にしてください。
+・話者の感情や調子（笑いながら、怒って、など）が分かる場合は、（笑）や（怒）のように注釈を入れてください。
+・話者が切り替わるタイミングは明確に段落を分けてください。` },
+                            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                             {
                                 inline_data: {
                                     mime_type: "audio/webm",
@@ -147,7 +155,7 @@
                      document.getElementById('summarizeBtn').disabled = false;
                      updateStatus("文字起こし完了。", false);
                 } else {
-                     throw new Error("Geminiからの応答が空でした。録音が短すぎる可能性があります。");
+                     throw new Error("Geminiからの応答が空でした。録音が短すぎるか、音声が認識されませんでした。");
                 }
 
             } catch (error) {

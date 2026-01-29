@@ -60,7 +60,8 @@
         <button id="startBtn" class="btn-blue" onclick="startRecording()">録音開始</button>
         <button id="stopBtn" class="btn-red" onclick="stopRecording()" disabled>停止</button>
         <p id="status">待機中...</p>
-        <p class="note">※約1分ごとに自動で区切って文字起こしを行います（区切り目の音飛び防止機能付き）。</p>
+        <!-- ▼▼▼ 注釈を変更 ▼▼▼ -->
+        <p class="note">※約3分ごとに自動で区切って文字起こしを行います（区切り目の音飛び防止機能付き）。</p>
     </div>
 
     <!-- 2. 確認 -->
@@ -96,8 +97,8 @@
     </div>
 
     <script>
-        // 設定：何ミリ秒ごとにファイルを区切るか（ここでは60秒＝60000ms）
-        const CHUNK_INTERVAL_MS = 60000; 
+        // ▼▼▼ 設定変更: 3分 (180000ms) ▼▼▼
+        const CHUNK_INTERVAL_MS = 180000; 
         const MODEL_NAME = "gemini-2.5-pro";
 
         let activeRecorder = null; // 現在稼働中のレコーダー
@@ -152,7 +153,8 @@
                 chunkCount = 0;
                 
                 toggleButtons(true);
-                updateStatus("録音開始... (途切れのない連続処理モード)", false);
+                // ▼▼▼ 表示変更: 文言をシンプルに ▼▼▼
+                updateStatus("録音開始...", false);
 
                 // 録音ループ開始
                 rotateRecorder();
@@ -164,14 +166,13 @@
             }
         }
 
-        // レコーダーを切り替える関数（隙間をなくすための重要ロジック）
+        // レコーダーを切り替える関数
         function rotateRecorder() {
             if (!isRecording) return;
 
             chunkCount++;
             
-            // 1. 新しいレコーダーを作成・準備（まだ開始しない）
-            // ローカル変数の chunks にデータを集める（クロージャ利用）
+            // 1. 新しいレコーダーを作成
             let localChunks = [];
             const newRecorder = new MediaRecorder(stream);
             
@@ -181,9 +182,6 @@
                 }
             };
 
-            // 停止時の処理（Geminiへ送信）
-            // ここで chunkCount の現在の値を固定して渡す必要があるが
-            // rotateRecorder呼び出し時の chunkCount がクロージャで保持されるのでOK
             const currentCountForThisRecorder = chunkCount;
             
             newRecorder.onstop = () => {
@@ -191,20 +189,19 @@
                 processChunkWithGemini(audioBlob, currentCountForThisRecorder);
             };
 
-            // 2. 新しいレコーダーを「先に」開始する
+            // 2. 新しいレコーダーを開始
             newRecorder.start();
             console.log(`Recorder #${currentCountForThisRecorder} started.`);
 
-            // 3. 古いレコーダーがあれば停止する
-            // これにより「新開始」→「旧停止」の順序になり、隙間がなくなる
+            // 3. 古いレコーダーを停止
             if (activeRecorder && activeRecorder.state !== "inactive") {
                 activeRecorder.stop();
             }
 
-            // 4. 現在のレコーダーを更新
+            // 4. 更新
             activeRecorder = newRecorder;
 
-            // 5. 次の切り替えタイマーをセット
+            // 5. 次のタイマー
             chunkTimer = setTimeout(() => {
                 if (isRecording) {
                     rotateRecorder();
@@ -218,17 +215,15 @@
             
             if (chunkTimer) clearTimeout(chunkTimer);
 
-            // 最後のレコーダーを停止
             if (activeRecorder && activeRecorder.state !== "inactive") {
                 activeRecorder.stop();
             }
 
-            // マイク停止
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
 
-            updateStatus("録音終了。残りのデータの処理を待機中...", true);
+            updateStatus("録音終了。処理を待機中...", true);
             toggleButtons(false);
         }
 
@@ -247,12 +242,11 @@
                 const payload = {
                     contents: [{
                         parts: [
-                            // ▼▼▼ プロンプト修正：音切れへの対策を指示 ▼▼▼
                             { text: `あなたは熟練した文字起こし担当者です。
-添付の音声データは、長い会議を1分ごとに区切ったうちの「パート${currentChunkIndex}」です。
+添付の音声データは、長い会議を3分ごとに区切ったうちの「パート${currentChunkIndex}」です。
 
 【重要：音切れへの対応】
-・ファイルが区切られているため、冒頭や末尾で単語が途切れている場合があります（例：「ありがとうございま」で終わる、「した」で始まるなど）。
+・ファイルが区切られているため、冒頭や末尾で単語が途切れている場合があります。
 ・そのような場合でも、**聞こえた音を勝手に省略せず、そのまま書き起こしてください**。文脈で補完できる場合は補完しても構いません。
 
 【ユーザーからの追加指示】
@@ -263,7 +257,6 @@ ${customPromptText}
 ・音声の内容のみを出力してください。
 ・「あー」「えっと」などの言い淀みも含めて文字にしてください。
 ・話者が切り替わるタイミングは改行してください。` },
-                            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                             {
                                 inline_data: {
                                     mime_type: "audio/webm",
@@ -297,9 +290,7 @@ ${customPromptText}
                      transcript = transcript.trim();
                      
                      const textArea = document.getElementById('transcriptionText');
-                     // 追記処理
                      if (textArea.value) {
-                         // 前のチャンクとの間に改行を入れる
                          textArea.value += "\n" + transcript;
                      } else {
                          textArea.value = transcript;

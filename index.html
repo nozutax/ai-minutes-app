@@ -28,6 +28,11 @@
         
         /* 追加プロンプト用のスタイル */
         .prompt-area { height: 80px; margin-bottom: 5px; }
+
+        /* 圧縮率選択のスタイル */
+        .compression-options { margin-bottom: 15px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 5px; }
+        .radio-label { margin-right: 15px; font-weight: normal; cursor: pointer; }
+        .radio-label input { margin-right: 5px; }
     </style>
 </head>
 <body>
@@ -50,14 +55,13 @@
     <div class="section">
         <h2>1. 録音</h2>
         
-        <!-- ▼▼▼ 追加プロンプト入力欄 ▼▼▼ -->
+        <!-- 追加プロンプト入力欄 -->
         <label>文字起こしへの追加指示（プロンプト）:</label>
         <textarea id="customPrompt" class="prompt-area" placeholder="例：専門用語の「〇〇」はカタカナ表記にしてください。話者が複数の場合は「Aさん」「Bさん」と分けてください。"></textarea>
         <label class="checkbox-label">
             <input type="checkbox" id="savePromptCheckbox"> このプロンプトを次回も使用する
         </label>
         <br>
-        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
 
         <button id="startBtn" class="btn-blue" onclick="startRecording()">録音開始</button>
         <button id="stopBtn" class="btn-red" onclick="stopRecording()" disabled>停止＆文字起こし</button>
@@ -69,6 +73,22 @@
         <h2>2. 文字起こし確認・修正</h2>
         <textarea id="transcriptionText" placeholder="ここに文字起こし結果が表示されます..."></textarea>
         <br><br>
+
+        <!-- ▼▼▼ 圧縮率の選択肢を追加 ▼▼▼ -->
+        <div class="compression-options">
+            <label style="margin-bottom:8px;">議事録の圧縮率（要約レベル）:</label>
+            <label class="radio-label">
+                <input type="radio" name="compression" value="high"> 高 (約95%カット・超要約)
+            </label>
+            <label class="radio-label">
+                <input type="radio" name="compression" value="medium" checked> 中 (約70%カット・通常)
+            </label>
+            <label class="radio-label">
+                <input type="radio" name="compression" value="low"> 低 (約30%カット・詳細)
+            </label>
+        </div>
+        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
+
         <button id="summarizeBtn" class="btn-green" onclick="generateMinutes()" disabled>この内容で議事録を作成</button>
         <button id="dlTransBtn" class="btn-orange" onclick="downloadText('transcriptionText', 'transcription')" disabled>文字起こしをダウンロード</button>
     </div>
@@ -89,20 +109,17 @@
 
         // ページ読み込み時に保存データ（APIキー、プロンプト）を復元
         window.addEventListener('load', () => {
-            // APIキーの復元
             const savedKey = localStorage.getItem('gemini_api_key');
             if (savedKey) {
                 document.getElementById('apiKey').value = savedKey;
                 document.getElementById('saveKeyCheckbox').checked = true;
             }
 
-            // ▼▼▼ プロンプトの復元 ▼▼▼
             const savedPrompt = localStorage.getItem('gemini_custom_prompt');
             if (savedPrompt) {
                 document.getElementById('customPrompt').value = savedPrompt;
                 document.getElementById('savePromptCheckbox').checked = true;
             }
-            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         });
 
         // 録音開始
@@ -121,7 +138,7 @@
                 localStorage.removeItem('gemini_api_key');
             }
 
-            // ▼▼▼ プロンプト保存処理 ▼▼▼
+            // プロンプト保存処理
             const customPrompt = document.getElementById('customPrompt').value;
             const shouldSavePrompt = document.getElementById('savePromptCheckbox').checked;
             if (shouldSavePrompt) {
@@ -129,7 +146,6 @@
             } else {
                 localStorage.removeItem('gemini_custom_prompt');
             }
-            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             try {
                 // UIリセット
@@ -180,9 +196,7 @@
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
             const apiKey = document.getElementById('apiKey').value;
             
-            // ▼▼▼ 追加プロンプトの内容を取得 ▼▼▼
             const customPromptText = document.getElementById('customPrompt').value;
-            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             updateStatus("Gemini に送信中...（解析中）", true);
 
@@ -195,7 +209,6 @@
                 const payload = {
                     contents: [{
                         parts: [
-                            // ▼▼▼ プロンプト生成（基本指示＋追加指示） ▼▼▼
                             { text: `あなたは熟練した文字起こし担当者です。
 添付の音声データの内容を、一言一句省略せずに（逐語起こしで）書き出してください。
 
@@ -210,7 +223,6 @@ ${customPromptText}
 ・「あー」「えっと」などの言い淀みや、言い間違いも含めて、聞こえた通りにすべて文字にしてください。
 ・話者の感情や調子（笑いながら、怒って、など）が分かる場合は、（笑）や（怒）のように注釈を入れてください。
 ・話者が切り替わるタイミングは明確に段落を分けてください。` },
-                            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                             {
                                 inline_data: {
                                     mime_type: "audio/webm",
@@ -256,6 +268,17 @@ ${customPromptText}
         async function generateMinutes() {
             const text = document.getElementById('transcriptionText').value;
             const apiKey = document.getElementById('apiKey').value;
+            
+            // ▼▼▼ 圧縮率の取得 ▼▼▼
+            const compressionElements = document.getElementsByName('compression');
+            let compressionRate = 'medium';
+            for (const el of compressionElements) {
+                if (el.checked) {
+                    compressionRate = el.value;
+                    break;
+                }
+            }
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             if (!text) return;
 
@@ -264,8 +287,35 @@ ${customPromptText}
 
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
+            // ▼▼▼ 圧縮率に応じた指示の切り替え ▼▼▼
+            let compressionInstruction = "";
+            if (compressionRate === "high") {
+                compressionInstruction = `
+                【重要：圧縮率「高」】
+                ・元の文章量から約95%を削減し、極めて簡潔にまとめてください。
+                ・詳細な経緯は省き、最終的な「決定事項」と「重要な結論」のみを抽出してください。
+                ・文章の意味や重要な事実関係が失われない範囲で、可能な限り短くしてください。`;
+            } else if (compressionRate === "medium") {
+                compressionInstruction = `
+                【重要：圧縮率「中」】
+                ・元の文章量から約70%を削減し、標準的な議事録の長さにしてください。
+                ・議論の流れが分かる程度に要約しつつ、冗長な部分はカットしてください。
+                ・文章の意味が失われないように注意してください。`;
+            } else { // low
+                compressionInstruction = `
+                【重要：圧縮率「低」】
+                ・元の文章量から約30%のみを削減し、詳細な議事録を作成してください。
+                ・「あー」「えっと」などの不要な言葉や、意味のない繰り返しのみを削除してください。
+                ・細かいニュアンスや発言の経緯はできるだけ残してください。
+                ・文章の意味が失われないように注意してください。`;
+            }
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
             const prompt = `
             以下の会議の文字起こしテキストをもとに、簡潔な議事録を作成してください。
+            
+            ${compressionInstruction}
+
             マークダウン形式を使わず、プレーンテキストで見やすく出力してください。
             挨拶や返事は不要です。
 

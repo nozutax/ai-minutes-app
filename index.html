@@ -23,8 +23,11 @@
         #status { font-weight: bold; color: #4285f4; margin-top: 10px; }
         .error { color: #ea4335; }
         .note { font-size: 0.9em; color: #666; }
-        .checkbox-label { font-weight: normal; font-size: 0.95em; cursor: pointer; display: flex; align-items: center; }
+        .checkbox-label { font-weight: normal; font-size: 0.95em; cursor: pointer; display: flex; align-items: center; margin-top: 5px; }
         .checkbox-label input { width: auto; margin-right: 8px; margin-bottom: 0; }
+        
+        /* 追加プロンプト用のスタイル */
+        .prompt-area { height: 80px; margin-bottom: 5px; }
     </style>
 </head>
 <body>
@@ -46,6 +49,16 @@
     <!-- 1. 録音 -->
     <div class="section">
         <h2>1. 録音</h2>
+        
+        <!-- ▼▼▼ 追加プロンプト入力欄 ▼▼▼ -->
+        <label>文字起こしへの追加指示（プロンプト）:</label>
+        <textarea id="customPrompt" class="prompt-area" placeholder="例：専門用語の「〇〇」はカタカナ表記にしてください。話者が複数の場合は「Aさん」「Bさん」と分けてください。"></textarea>
+        <label class="checkbox-label">
+            <input type="checkbox" id="savePromptCheckbox"> このプロンプトを次回も使用する
+        </label>
+        <br>
+        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
+
         <button id="startBtn" class="btn-blue" onclick="startRecording()">録音開始</button>
         <button id="stopBtn" class="btn-red" onclick="stopRecording()" disabled>停止＆文字起こし</button>
         <p id="status">待機中...</p>
@@ -74,13 +87,22 @@
         let stream; 
         const MODEL_NAME = "gemini-2.5-pro";
 
-        // ページ読み込み時に保存されたキーを復元
+        // ページ読み込み時に保存データ（APIキー、プロンプト）を復元
         window.addEventListener('load', () => {
+            // APIキーの復元
             const savedKey = localStorage.getItem('gemini_api_key');
             if (savedKey) {
                 document.getElementById('apiKey').value = savedKey;
                 document.getElementById('saveKeyCheckbox').checked = true;
             }
+
+            // ▼▼▼ プロンプトの復元 ▼▼▼
+            const savedPrompt = localStorage.getItem('gemini_custom_prompt');
+            if (savedPrompt) {
+                document.getElementById('customPrompt').value = savedPrompt;
+                document.getElementById('savePromptCheckbox').checked = true;
+            }
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         });
 
         // 録音開始
@@ -91,13 +113,23 @@
                 return;
             }
 
-            // キー保存処理
-            const shouldSave = document.getElementById('saveKeyCheckbox').checked;
-            if (shouldSave) {
+            // APIキー保存処理
+            const shouldSaveKey = document.getElementById('saveKeyCheckbox').checked;
+            if (shouldSaveKey) {
                 localStorage.setItem('gemini_api_key', apiKey);
             } else {
                 localStorage.removeItem('gemini_api_key');
             }
+
+            // ▼▼▼ プロンプト保存処理 ▼▼▼
+            const customPrompt = document.getElementById('customPrompt').value;
+            const shouldSavePrompt = document.getElementById('savePromptCheckbox').checked;
+            if (shouldSavePrompt) {
+                localStorage.setItem('gemini_custom_prompt', customPrompt);
+            } else {
+                localStorage.removeItem('gemini_custom_prompt');
+            }
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             try {
                 // UIリセット
@@ -147,6 +179,10 @@
         async function processAudioWithGemini() {
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
             const apiKey = document.getElementById('apiKey').value;
+            
+            // ▼▼▼ 追加プロンプトの内容を取得 ▼▼▼
+            const customPromptText = document.getElementById('customPrompt').value;
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             updateStatus("Gemini に送信中...（解析中）", true);
 
@@ -159,19 +195,22 @@
                 const payload = {
                     contents: [{
                         parts: [
-                            // ▼▼▼ プロンプト修正: 余計な返事を禁止 ▼▼▼
+                            // ▼▼▼ プロンプト生成（基本指示＋追加指示） ▼▼▼
                             { text: `あなたは熟練した文字起こし担当者です。
 添付の音声データの内容を、一言一句省略せずに（逐語起こしで）書き出してください。
+
+【ユーザーからの追加指示】
+${customPromptText}
 
 【極めて重要な指示】
 ・出力には、あなた（AI）からの挨拶、了解の返事、説明書き（「以下に記載します」等）は一切含めないでください。
 ・音声の内容のみをいきなり出力してください。
 
-【制約事項】
+【基本制約事項】
 ・「あー」「えっと」などの言い淀みや、言い間違いも含めて、聞こえた通りにすべて文字にしてください。
 ・話者の感情や調子（笑いながら、怒って、など）が分かる場合は、（笑）や（怒）のように注釈を入れてください。
 ・話者が切り替わるタイミングは明確に段落を分けてください。` },
-                            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+                            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                             {
                                 inline_data: {
                                     mime_type: "audio/webm",
@@ -196,8 +235,6 @@
 
                 if (data.candidates && data.candidates[0].content) {
                      let transcript = data.candidates[0].content.parts[0].text;
-                     
-                     // 念のためのトリミング（前後の改行等を削除）
                      transcript = transcript.trim();
                      
                      document.getElementById('transcriptionText').value = transcript;

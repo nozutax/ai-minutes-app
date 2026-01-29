@@ -60,8 +60,9 @@
         <button id="startBtn" class="btn-blue" onclick="startRecording()">録音開始</button>
         <button id="stopBtn" class="btn-red" onclick="stopRecording()" disabled>停止</button>
         <p id="status">待機中...</p>
-        <!-- ▼▼▼ 注釈を変更 ▼▼▼ -->
-        <p class="note">※約3分ごとに自動で区切って文字起こしを行います（区切り目の音飛び防止機能付き）。</p>
+        <!-- ▼▼▼ 修正箇所：文言を削除 ▼▼▼ -->
+        <p class="note">※約3分ごとに自動で区切って文字起こしを行います。</p>
+        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
     </div>
 
     <!-- 2. 確認 -->
@@ -97,7 +98,7 @@
     </div>
 
     <script>
-        // ▼▼▼ 設定変更: 3分 (180000ms) ▼▼▼
+        // 設定：3分 (180000ms)
         const CHUNK_INTERVAL_MS = 180000; 
         const MODEL_NAME = "gemini-2.5-pro";
 
@@ -153,7 +154,6 @@
                 chunkCount = 0;
                 
                 toggleButtons(true);
-                // ▼▼▼ 表示変更: 文言をシンプルに ▼▼▼
                 updateStatus("録音開始...", false);
 
                 // 録音ループ開始

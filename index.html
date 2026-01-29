@@ -60,7 +60,7 @@
         <button id="startBtn" class="btn-blue" onclick="startRecording()">録音開始</button>
         <button id="stopBtn" class="btn-red" onclick="stopRecording()" disabled>停止</button>
         <p id="status">待機中...</p>
-        <p class="note">※約1分ごとに自動で区切って文字起こしを行います。</p>
+        <p class="note">※約1分ごとに自動で区切って文字起こしを行います（区切り目の音飛び防止機能付き）。</p>
     </div>
 
     <!-- 2. 確認 -->
@@ -100,11 +100,11 @@
         const CHUNK_INTERVAL_MS = 60000; 
         const MODEL_NAME = "gemini-2.5-pro";
 
-        let mediaRecorder;
+        let activeRecorder = null; // 現在稼働中のレコーダー
         let stream; 
-        let isRecording = false; // 録音状態フラグ
-        let chunkTimer = null;   // タイマー管理
-        let chunkCount = 0;      // 今何個目のファイルか
+        let isRecording = false; 
+        let chunkTimer = null;   
+        let chunkCount = 0;      
 
         window.addEventListener('load', () => {
             const savedKey = localStorage.getItem('gemini_api_key');
@@ -120,7 +120,7 @@
             }
         });
 
-        // 録音開始（最初のセットアップ）
+        // 録音開始
         async function startRecording() {
             const apiKey = document.getElementById('apiKey').value;
             if (!apiKey) {
@@ -145,17 +145,17 @@
                 document.getElementById('dlTransBtn').disabled = true;
                 document.getElementById('dlMinutesBtn').disabled = true;
 
-                // マイク取得（これは録音中ずっと維持する）
+                // マイク取得
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 
                 isRecording = true;
                 chunkCount = 0;
                 
                 toggleButtons(true);
-                updateStatus("録音開始... (1分ごとに文字起こしします)", false);
+                updateStatus("録音開始... (途切れのない連続処理モード)", false);
 
-                // 最初の録音セグメントを開始
-                startNextChunk();
+                // 録音ループ開始
+                rotateRecorder();
 
             } catch (err) {
                 alert("マイクの使用が許可されていません。");
@@ -164,73 +164,75 @@
             }
         }
 
-        // 録音の1セグメントを開始する関数
-        function startNextChunk() {
+        // レコーダーを切り替える関数（隙間をなくすための重要ロジック）
+        function rotateRecorder() {
             if (!isRecording) return;
 
             chunkCount++;
+            
+            // 1. 新しいレコーダーを作成・準備（まだ開始しない）
+            // ローカル変数の chunks にデータを集める（クロージャ利用）
             let localChunks = [];
-
-            // 新しいレコーダーを作成（ストリームは使い回す）
-            mediaRecorder = new MediaRecorder(stream);
-
-            mediaRecorder.ondataavailable = event => {
+            const newRecorder = new MediaRecorder(stream);
+            
+            newRecorder.ondataavailable = event => {
                 if (event.data.size > 0) {
                     localChunks.push(event.data);
                 }
             };
 
-            // このセグメントの録音が止まったら、すぐにGeminiへ送信
-            mediaRecorder.onstop = () => {
+            // 停止時の処理（Geminiへ送信）
+            // ここで chunkCount の現在の値を固定して渡す必要があるが
+            // rotateRecorder呼び出し時の chunkCount がクロージャで保持されるのでOK
+            const currentCountForThisRecorder = chunkCount;
+            
+            newRecorder.onstop = () => {
                 const audioBlob = new Blob(localChunks, { type: 'audio/webm' });
-                processChunkWithGemini(audioBlob, chunkCount);
+                processChunkWithGemini(audioBlob, currentCountForThisRecorder);
             };
 
-            mediaRecorder.start();
-            console.log(`Chunk #${chunkCount} started.`);
+            // 2. 新しいレコーダーを「先に」開始する
+            newRecorder.start();
+            console.log(`Recorder #${currentCountForThisRecorder} started.`);
 
-            // 指定時間（1分）後にこのレコーダーを止めるタイマーをセット
+            // 3. 古いレコーダーがあれば停止する
+            // これにより「新開始」→「旧停止」の順序になり、隙間がなくなる
+            if (activeRecorder && activeRecorder.state !== "inactive") {
+                activeRecorder.stop();
+            }
+
+            // 4. 現在のレコーダーを更新
+            activeRecorder = newRecorder;
+
+            // 5. 次の切り替えタイマーをセット
             chunkTimer = setTimeout(() => {
                 if (isRecording) {
-                    // 録音継続中なら、今のレコーダーを止めて次を開始
-                    stopCurrentRecorderAndNext();
+                    rotateRecorder();
                 }
             }, CHUNK_INTERVAL_MS);
         }
 
-        // 現在のレコーダーを止めて、次を即座に開始する（ギャップを最小にする）
-        function stopCurrentRecorderAndNext() {
-            if (mediaRecorder && mediaRecorder.state !== "inactive") {
-                mediaRecorder.stop(); // これが onstop を発火させ、Gemini送信へ
-            }
-            // 即座に次を開始
-            if (isRecording) {
-                startNextChunk();
-            }
-        }
-
-        // ユーザーが停止ボタンを押したとき
+        // 停止ボタン処理
         function stopRecording() {
             isRecording = false;
             
-            // タイマー解除
             if (chunkTimer) clearTimeout(chunkTimer);
 
-            // 現在動いている最後のレコーダーを停止（最後の送信が行われる）
-            if (mediaRecorder && mediaRecorder.state !== "inactive") {
-                mediaRecorder.stop();
+            // 最後のレコーダーを停止
+            if (activeRecorder && activeRecorder.state !== "inactive") {
+                activeRecorder.stop();
             }
 
-            // マイク自体の停止（赤いアイコンを消す）
+            // マイク停止
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
 
-            updateStatus("録音終了。最後のデータの文字起こしを待機中...", true);
+            updateStatus("録音終了。残りのデータの処理を待機中...", true);
             toggleButtons(false);
         }
 
-        // Gemini APIへチャンクを送信する
+        // Gemini APIへチャンクを送信
         async function processChunkWithGemini(audioBlob, currentChunkIndex) {
             const apiKey = document.getElementById('apiKey').value;
             const customPromptText = document.getElementById('customPrompt').value;
@@ -245,9 +247,13 @@
                 const payload = {
                     contents: [{
                         parts: [
+                            // ▼▼▼ プロンプト修正：音切れへの対策を指示 ▼▼▼
                             { text: `あなたは熟練した文字起こし担当者です。
-添付の音声データは会議の「途中の一部（約1分間）」です。
-前後の文脈は気にせず、聞こえた内容を一言一句省略せずに（逐語起こしで）書き出してください。
+添付の音声データは、長い会議を1分ごとに区切ったうちの「パート${currentChunkIndex}」です。
+
+【重要：音切れへの対応】
+・ファイルが区切られているため、冒頭や末尾で単語が途切れている場合があります（例：「ありがとうございま」で終わる、「した」で始まるなど）。
+・そのような場合でも、**聞こえた音を勝手に省略せず、そのまま書き起こしてください**。文脈で補完できる場合は補完しても構いません。
 
 【ユーザーからの追加指示】
 ${customPromptText}
@@ -255,10 +261,9 @@ ${customPromptText}
 【極めて重要な指示】
 ・出力には、挨拶、返事、説明書きは一切含めないでください。
 ・音声の内容のみを出力してください。
-
-【制約事項】
 ・「あー」「えっと」などの言い淀みも含めて文字にしてください。
 ・話者が切り替わるタイミングは改行してください。` },
+                            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                             {
                                 inline_data: {
                                     mime_type: "audio/webm",
@@ -291,21 +296,19 @@ ${customPromptText}
                      let transcript = data.candidates[0].content.parts[0].text;
                      transcript = transcript.trim();
                      
-                     // ▼▼▼ 追記処理 ▼▼▼
                      const textArea = document.getElementById('transcriptionText');
-                     // 前のテキストがあれば改行を入れて追記
+                     // 追記処理
                      if (textArea.value) {
-                         textArea.value += "\n\n" + transcript;
+                         // 前のチャンクとの間に改行を入れる
+                         textArea.value += "\n" + transcript;
                      } else {
                          textArea.value = transcript;
                      }
-                     // 一番下までスクロール
                      textArea.scrollTop = textArea.scrollHeight;
 
                      document.getElementById('summarizeBtn').disabled = false;
                      document.getElementById('dlTransBtn').disabled = false;
                      
-                     // 録音が終わっていて、これが最後の処理だった場合
                      if (!isRecording) {
                          updateStatus("すべての文字起こしが完了しました。", false);
                      } else {
@@ -319,7 +322,7 @@ ${customPromptText}
             } catch (error) {
                 console.error(`Error processing chunk #${currentChunkIndex}:`, error);
                 const textArea = document.getElementById('transcriptionText');
-                textArea.value += `\n\n[エラー: データ #${currentChunkIndex} の処理に失敗しました]`;
+                textArea.value += `\n[エラー: データ #${currentChunkIndex} の処理に失敗しました]\n`;
             }
         }
 
@@ -328,7 +331,6 @@ ${customPromptText}
             const text = document.getElementById('transcriptionText').value;
             const apiKey = document.getElementById('apiKey').value;
             
-            // 圧縮率取得
             const compressionElements = document.getElementsByName('compression');
             let compressionRate = 'medium';
             for (const el of compressionElements) {

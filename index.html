@@ -350,3 +350,108 @@ ${customPromptText}
                 compressionInstruction = `
                 【重要：圧縮率「高」】
                 ・元の文章量から約95%を削減し、極めて簡潔にまとめてください。
+                ・詳細な経緯は省き、最終的な「決定事項」と「重要な結論」のみを抽出してください。`;
+            } else if (compressionRate === "medium") {
+                compressionInstruction = `
+                【重要：圧縮率「中」】
+                ・元の文章量から約70%を削減し、標準的な議事録の長さにしてください。
+                ・議論の流れが分かる程度に要約してください。`;
+            } else {
+                compressionInstruction = `
+                【重要：圧縮率「低」】
+                ・元の文章量から約30%のみを削減し、詳細な議事録を作成してください。
+                ・不要な言葉や繰り返しのみを削除してください。`;
+            }
+
+            const prompt = `
+            以下の会議の文字起こしテキスト（分割して認識されたものの結合）をもとに、整合性の取れた簡潔な議事録を作成してください。
+            
+            ${compressionInstruction}
+
+            マークダウン形式を使わず、プレーンテキストで見やすく出力してください。
+            挨拶や返事は不要です。
+
+            【形式】
+            ・議題
+            ・決定事項
+            ・ネクストアクション
+
+            【テキスト】
+            ${text}
+            `;
+
+            try {
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    safetySettings: [
+                        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+                    ]
+                };
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (data.error) throw new Error(data.error.message);
+
+                if (data.candidates && data.candidates[0].content) {
+                    const summary = data.candidates[0].content.parts[0].text;
+                    document.getElementById('minutesText').value = summary;
+                    document.getElementById('dlMinutesBtn').disabled = false;
+                    updateStatus("議事録作成完了！", false);
+                } else {
+                    throw new Error("議事録の生成に失敗しました（応答が空）。");
+                }
+
+            } catch (error) {
+                updateStatus(`エラー: ${error.message}`, true);
+            } finally {
+                document.getElementById('summarizeBtn').disabled = false;
+            }
+        }
+
+        // ユーティリティ
+        function downloadText(elementId, filePrefix) {
+            const text = document.getElementById(elementId).value;
+            if (!text) { alert("ダウンロードする内容がありません。"); return; }
+            const now = new Date();
+            const timestamp = now.toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+            const filename = `${filePrefix}_${timestamp}.txt`;
+            const blob = new Blob([text], { type: "text/plain" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        function blobToBase64(blob) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+            });
+        }
+
+        function updateStatus(msg, isProcessing) {
+            const el = document.getElementById('status');
+            el.innerText = msg;
+            el.className = isProcessing ? '' : (msg.includes('エラー') ? 'error' : '');
+            el.style.color = isProcessing ? '#4285f4' : (msg.includes('エラー') ? '#ea4335' : '#333');
+        }
+
+        function toggleButtons(isRecording) {
+            document.getElementById('startBtn').disabled = isRecording;
+            document.getElementById('stopBtn').disabled = !isRecording;
+        }
+    </script>
+</body>
+</html>

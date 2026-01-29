@@ -26,10 +26,8 @@
         .checkbox-label { font-weight: normal; font-size: 0.95em; cursor: pointer; display: flex; align-items: center; margin-top: 5px; }
         .checkbox-label input { width: auto; margin-right: 8px; margin-bottom: 0; }
         
-        /* 追加プロンプト用のスタイル */
         .prompt-area { height: 80px; margin-bottom: 5px; }
 
-        /* 圧縮率選択のスタイル */
         .compression-options { margin-bottom: 15px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 5px; }
         .radio-label { margin-right: 15px; font-weight: normal; cursor: pointer; }
         .radio-label input { margin-right: 5px; }
@@ -74,7 +72,7 @@
         <textarea id="transcriptionText" placeholder="ここに文字起こし結果が表示されます..."></textarea>
         <br><br>
 
-        <!-- ▼▼▼ 圧縮率の選択肢を追加 ▼▼▼ -->
+        <!-- 圧縮率の選択肢 -->
         <div class="compression-options">
             <label style="margin-bottom:8px;">議事録の圧縮率（要約レベル）:</label>
             <label class="radio-label">
@@ -87,7 +85,6 @@
                 <input type="radio" name="compression" value="low"> 低 (約30%カット・詳細)
             </label>
         </div>
-        <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
 
         <button id="summarizeBtn" class="btn-green" onclick="generateMinutes()" disabled>この内容で議事録を作成</button>
         <button id="dlTransBtn" class="btn-orange" onclick="downloadText('transcriptionText', 'transcription')" disabled>文字起こしをダウンロード</button>
@@ -230,7 +227,15 @@ ${customPromptText}
                                 }
                             }
                         ]
-                    }]
+                    }],
+                    // ▼▼▼ 安全フィルターの解除設定を追加（エラー対策） ▼▼▼
+                    safetySettings: [
+                        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+                    ]
+                    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                 };
 
                 const response = await fetch(url, {
@@ -245,7 +250,13 @@ ${customPromptText}
                     throw new Error(data.error.message);
                 }
 
-                if (data.candidates && data.candidates[0].content) {
+                // ▼▼▼ エラー判定を強化（undefinedエラー対策） ▼▼▼
+                if (data.candidates && 
+                    data.candidates.length > 0 && 
+                    data.candidates[0].content && 
+                    data.candidates[0].content.parts && 
+                    data.candidates[0].content.parts.length > 0) {
+                     
                      let transcript = data.candidates[0].content.parts[0].text;
                      transcript = transcript.trim();
                      
@@ -255,8 +266,19 @@ ${customPromptText}
                      document.getElementById('dlTransBtn').disabled = false;
                      updateStatus("文字起こし完了。", false);
                 } else {
-                     throw new Error("Geminiからの応答が空でした。録音が短すぎるか、音声が認識されませんでした。");
+                     // 失敗理由の詳細を表示
+                     console.log(data); // デバッグ用にコンソール出力
+                     let detail = "AIからの応答が空でした。";
+                     
+                     if (data.promptFeedback && data.promptFeedback.blockReason) {
+                        detail = `安全基準によりブロックされました (${data.promptFeedback.blockReason})`;
+                     } else if (data.candidates && data.candidates[0] && data.candidates[0].finishReason) {
+                        detail = `終了理由: ${data.candidates[0].finishReason}`;
+                     }
+                     
+                     throw new Error(`文字起こしに失敗しました: ${detail}`);
                 }
+                // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             } catch (error) {
                 updateStatus(`エラー: ${error.message}`, true);
@@ -269,7 +291,7 @@ ${customPromptText}
             const text = document.getElementById('transcriptionText').value;
             const apiKey = document.getElementById('apiKey').value;
             
-            // ▼▼▼ 圧縮率の取得 ▼▼▼
+            // 圧縮率の取得
             const compressionElements = document.getElementsByName('compression');
             let compressionRate = 'medium';
             for (const el of compressionElements) {
@@ -278,7 +300,6 @@ ${customPromptText}
                     break;
                 }
             }
-            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             if (!text) return;
 
@@ -287,7 +308,7 @@ ${customPromptText}
 
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
-            // ▼▼▼ 圧縮率に応じた指示の切り替え ▼▼▼
+            // 圧縮率に応じた指示の切り替え
             let compressionInstruction = "";
             if (compressionRate === "high") {
                 compressionInstruction = `
@@ -309,7 +330,6 @@ ${customPromptText}
                 ・細かいニュアンスや発言の経緯はできるだけ残してください。
                 ・文章の意味が失われないように注意してください。`;
             }
-            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             const prompt = `
             以下の会議の文字起こしテキストをもとに、簡潔な議事録を作成してください。
@@ -332,7 +352,14 @@ ${customPromptText}
                 const payload = {
                     contents: [{
                         parts: [{ text: prompt }]
-                    }]
+                    }],
+                    // 議事録生成時も安全設定を緩和
+                    safetySettings: [
+                        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+                    ]
                 };
 
                 const response = await fetch(url, {
@@ -347,11 +374,24 @@ ${customPromptText}
                     throw new Error(data.error.message);
                 }
 
-                const summary = data.candidates[0].content.parts[0].text;
-                document.getElementById('minutesText').value = summary;
-                document.getElementById('dlMinutesBtn').disabled = false;
-
-                updateStatus("議事録作成完了！", false);
+                // 議事録生成結果の抽出
+                if (data.candidates && 
+                    data.candidates.length > 0 && 
+                    data.candidates[0].content && 
+                    data.candidates[0].content.parts && 
+                    data.candidates[0].content.parts.length > 0) {
+                        
+                    const summary = data.candidates[0].content.parts[0].text;
+                    document.getElementById('minutesText').value = summary;
+                    document.getElementById('dlMinutesBtn').disabled = false;
+                    updateStatus("議事録作成完了！", false);
+                } else {
+                     let detail = "AIからの応答が空でした。";
+                     if (data.promptFeedback && data.promptFeedback.blockReason) {
+                        detail = `ブロックされました (${data.promptFeedback.blockReason})`;
+                     }
+                     throw new Error(`議事録作成に失敗しました: ${detail}`);
+                }
 
             } catch (error) {
                 updateStatus(`エラー: ${error.message}`, true);

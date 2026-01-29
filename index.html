@@ -12,14 +12,13 @@
         input[type="password"] { width: 100%; padding: 10px; margin-bottom: 10px; box-sizing: border-box; }
         button { padding: 10px 20px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; color: white; margin-right: 10px; margin-bottom: 10px; }
         
-        /* ボタンの色定義 */
         .btn-blue { background-color: #4285f4; }
         .btn-red { background-color: #ea4335; }
         .btn-green { background-color: #34a853; }
         .btn-orange { background-color: #f6851b; }
         
         button:disabled { background-color: #ccc; cursor: not-allowed; }
-        textarea { width: 100%; height: 150px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; margin-top: 10px; }
+        textarea { width: 100%; height: 200px; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; margin-top: 10px; }
         #status { font-weight: bold; color: #4285f4; margin-top: 10px; }
         .error { color: #ea4335; }
         .note { font-size: 0.9em; color: #666; }
@@ -27,7 +26,6 @@
         .checkbox-label input { width: auto; margin-right: 8px; margin-bottom: 0; }
         
         .prompt-area { height: 80px; margin-bottom: 5px; }
-
         .compression-options { margin-bottom: 15px; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 5px; }
         .radio-label { margin-right: 15px; font-weight: normal; cursor: pointer; }
         .radio-label input { margin-right: 5px; }
@@ -45,7 +43,6 @@
         <label class="checkbox-label">
             <input type="checkbox" id="saveKeyCheckbox"> 次回から自動入力する
         </label>
-        
         <p class="note" style="margin-top:10px;">※キーはブラウザ内でのみ使用・保存され、外部サーバーには送信されません。</p>
     </div>
 
@@ -53,7 +50,6 @@
     <div class="section">
         <h2>1. 録音</h2>
         
-        <!-- 追加プロンプト入力欄 -->
         <label>文字起こしへの追加指示（プロンプト）:</label>
         <textarea id="customPrompt" class="prompt-area" placeholder="例：専門用語の「〇〇」はカタカナ表記にしてください。話者が複数の場合は「Aさん」「Bさん」と分けてください。"></textarea>
         <label class="checkbox-label">
@@ -62,27 +58,28 @@
         <br>
 
         <button id="startBtn" class="btn-blue" onclick="startRecording()">録音開始</button>
-        <button id="stopBtn" class="btn-red" onclick="stopRecording()" disabled>停止＆文字起こし</button>
+        <button id="stopBtn" class="btn-red" onclick="stopRecording()" disabled>停止</button>
         <p id="status">待機中...</p>
+        <p class="note">※約1分ごとに自動で区切って文字起こしを行います。</p>
     </div>
 
     <!-- 2. 確認 -->
     <div class="section">
         <h2>2. 文字起こし確認・修正</h2>
-        <textarea id="transcriptionText" placeholder="ここに文字起こし結果が表示されます..."></textarea>
+        <p class="note">録音中もここに順次テキストが追加されていきます。</p>
+        <textarea id="transcriptionText" placeholder="ここに文字起こし結果が順次表示されます..."></textarea>
         <br><br>
 
-        <!-- 圧縮率の選択肢 -->
         <div class="compression-options">
             <label style="margin-bottom:8px;">議事録の圧縮率（要約レベル）:</label>
             <label class="radio-label">
-                <input type="radio" name="compression" value="high"> 高 (約95%カット・超要約)
+                <input type="radio" name="compression" value="high"> 高 (約95%カット)
             </label>
             <label class="radio-label">
-                <input type="radio" name="compression" value="medium" checked> 中 (約70%カット・通常)
+                <input type="radio" name="compression" value="medium" checked> 中 (約70%カット)
             </label>
             <label class="radio-label">
-                <input type="radio" name="compression" value="low"> 低 (約30%カット・詳細)
+                <input type="radio" name="compression" value="low"> 低 (約30%カット)
             </label>
         </div>
 
@@ -99,12 +96,16 @@
     </div>
 
     <script>
-        let mediaRecorder;
-        let audioChunks = [];
-        let stream; 
+        // 設定：何ミリ秒ごとにファイルを区切るか（ここでは60秒＝60000ms）
+        const CHUNK_INTERVAL_MS = 60000; 
         const MODEL_NAME = "gemini-2.5-pro";
 
-        // ページ読み込み時に保存データ（APIキー、プロンプト）を復元
+        let mediaRecorder;
+        let stream; 
+        let isRecording = false; // 録音状態フラグ
+        let chunkTimer = null;   // タイマー管理
+        let chunkCount = 0;      // 今何個目のファイルか
+
         window.addEventListener('load', () => {
             const savedKey = localStorage.getItem('gemini_api_key');
             if (savedKey) {
@@ -119,7 +120,7 @@
             }
         });
 
-        // 録音開始
+        // 録音開始（最初のセットアップ）
         async function startRecording() {
             const apiKey = document.getElementById('apiKey').value;
             if (!apiKey) {
@@ -127,22 +128,15 @@
                 return;
             }
 
-            // APIキー保存処理
+            // 保存処理
             const shouldSaveKey = document.getElementById('saveKeyCheckbox').checked;
-            if (shouldSaveKey) {
-                localStorage.setItem('gemini_api_key', apiKey);
-            } else {
-                localStorage.removeItem('gemini_api_key');
-            }
+            localStorage.setItem('gemini_api_key', shouldSaveKey ? apiKey : "");
+            if (!shouldSaveKey) localStorage.removeItem('gemini_api_key');
 
-            // プロンプト保存処理
             const customPrompt = document.getElementById('customPrompt').value;
             const shouldSavePrompt = document.getElementById('savePromptCheckbox').checked;
-            if (shouldSavePrompt) {
-                localStorage.setItem('gemini_custom_prompt', customPrompt);
-            } else {
-                localStorage.removeItem('gemini_custom_prompt');
-            }
+            if (shouldSavePrompt) localStorage.setItem('gemini_custom_prompt', customPrompt);
+            else localStorage.removeItem('gemini_custom_prompt');
 
             try {
                 // UIリセット
@@ -151,75 +145,120 @@
                 document.getElementById('dlTransBtn').disabled = true;
                 document.getElementById('dlMinutesBtn').disabled = true;
 
-                audioChunks = [];
-
+                // マイク取得（これは録音中ずっと維持する）
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-
-                mediaRecorder.ondataavailable = event => {
-                    if (event.data.size > 0) {
-                        audioChunks.push(event.data);
-                    }
-                };
-
-                mediaRecorder.onstop = processAudioWithGemini;
-
-                mediaRecorder.start();
-                updateStatus("録音中...", false);
+                
+                isRecording = true;
+                chunkCount = 0;
+                
                 toggleButtons(true);
+                updateStatus("録音開始... (1分ごとに文字起こしします)", false);
+
+                // 最初の録音セグメントを開始
+                startNextChunk();
+
             } catch (err) {
-                alert("マイクの使用が許可されていません。ブラウザの設定を確認してください。");
+                alert("マイクの使用が許可されていません。");
                 console.error(err);
                 updateStatus("エラー: マイクにアクセスできませんでした", true);
             }
         }
 
-        // 録音停止
+        // 録音の1セグメントを開始する関数
+        function startNextChunk() {
+            if (!isRecording) return;
+
+            chunkCount++;
+            let localChunks = [];
+
+            // 新しいレコーダーを作成（ストリームは使い回す）
+            mediaRecorder = new MediaRecorder(stream);
+
+            mediaRecorder.ondataavailable = event => {
+                if (event.data.size > 0) {
+                    localChunks.push(event.data);
+                }
+            };
+
+            // このセグメントの録音が止まったら、すぐにGeminiへ送信
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(localChunks, { type: 'audio/webm' });
+                processChunkWithGemini(audioBlob, chunkCount);
+            };
+
+            mediaRecorder.start();
+            console.log(`Chunk #${chunkCount} started.`);
+
+            // 指定時間（1分）後にこのレコーダーを止めるタイマーをセット
+            chunkTimer = setTimeout(() => {
+                if (isRecording) {
+                    // 録音継続中なら、今のレコーダーを止めて次を開始
+                    stopCurrentRecorderAndNext();
+                }
+            }, CHUNK_INTERVAL_MS);
+        }
+
+        // 現在のレコーダーを止めて、次を即座に開始する（ギャップを最小にする）
+        function stopCurrentRecorderAndNext() {
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop(); // これが onstop を発火させ、Gemini送信へ
+            }
+            // 即座に次を開始
+            if (isRecording) {
+                startNextChunk();
+            }
+        }
+
+        // ユーザーが停止ボタンを押したとき
         function stopRecording() {
+            isRecording = false;
+            
+            // タイマー解除
+            if (chunkTimer) clearTimeout(chunkTimer);
+
+            // 現在動いている最後のレコーダーを停止（最後の送信が行われる）
             if (mediaRecorder && mediaRecorder.state !== "inactive") {
                 mediaRecorder.stop();
             }
 
+            // マイク自体の停止（赤いアイコンを消す）
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
             }
 
-            updateStatus("音声データを処理中...", true);
+            updateStatus("録音終了。最後のデータの文字起こしを待機中...", true);
             toggleButtons(false);
         }
 
-        // Geminiで音声文字起こし
-        async function processAudioWithGemini() {
-            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        // Gemini APIへチャンクを送信する
+        async function processChunkWithGemini(audioBlob, currentChunkIndex) {
             const apiKey = document.getElementById('apiKey').value;
-            
             const customPromptText = document.getElementById('customPrompt').value;
 
-            updateStatus("Gemini に送信中...（解析中）", true);
+            updateStatus(`データ #${currentChunkIndex} を解析中...`, true);
 
             try {
                 const base64Audio = await blobToBase64(audioBlob);
                 const cleanBase64 = base64Audio.split(',')[1];
-
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
                 const payload = {
                     contents: [{
                         parts: [
                             { text: `あなたは熟練した文字起こし担当者です。
-添付の音声データの内容を、一言一句省略せずに（逐語起こしで）書き出してください。
+添付の音声データは会議の「途中の一部（約1分間）」です。
+前後の文脈は気にせず、聞こえた内容を一言一句省略せずに（逐語起こしで）書き出してください。
 
 【ユーザーからの追加指示】
 ${customPromptText}
 
 【極めて重要な指示】
-・出力には、あなた（AI）からの挨拶、了解の返事、説明書き（「以下に記載します」等）は一切含めないでください。
-・音声の内容のみをいきなり出力してください。
+・出力には、挨拶、返事、説明書きは一切含めないでください。
+・音声の内容のみを出力してください。
 
-【基本制約事項】
-・「あー」「えっと」などの言い淀みや、言い間違いも含めて、聞こえた通りにすべて文字にしてください。
-・話者の感情や調子（笑いながら、怒って、など）が分かる場合は、（笑）や（怒）のように注釈を入れてください。
-・話者が切り替わるタイミングは明確に段落を分けてください。` },
+【制約事項】
+・「あー」「えっと」などの言い淀みも含めて文字にしてください。
+・話者が切り替わるタイミングは改行してください。` },
                             {
                                 inline_data: {
                                     mime_type: "audio/webm",
@@ -228,14 +267,12 @@ ${customPromptText}
                             }
                         ]
                     }],
-                    // ▼▼▼ 安全フィルターの解除設定を追加（エラー対策） ▼▼▼
                     safetySettings: [
                         { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
                         { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
                         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
                         { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
                     ]
-                    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
                 };
 
                 const response = await fetch(url, {
@@ -250,48 +287,48 @@ ${customPromptText}
                     throw new Error(data.error.message);
                 }
 
-                // ▼▼▼ エラー判定を強化（undefinedエラー対策） ▼▼▼
-                if (data.candidates && 
-                    data.candidates.length > 0 && 
-                    data.candidates[0].content && 
-                    data.candidates[0].content.parts && 
-                    data.candidates[0].content.parts.length > 0) {
-                     
+                if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts) {
                      let transcript = data.candidates[0].content.parts[0].text;
                      transcript = transcript.trim();
                      
-                     document.getElementById('transcriptionText').value = transcript;
-                     
+                     // ▼▼▼ 追記処理 ▼▼▼
+                     const textArea = document.getElementById('transcriptionText');
+                     // 前のテキストがあれば改行を入れて追記
+                     if (textArea.value) {
+                         textArea.value += "\n\n" + transcript;
+                     } else {
+                         textArea.value = transcript;
+                     }
+                     // 一番下までスクロール
+                     textArea.scrollTop = textArea.scrollHeight;
+
                      document.getElementById('summarizeBtn').disabled = false;
                      document.getElementById('dlTransBtn').disabled = false;
-                     updateStatus("文字起こし完了。", false);
-                } else {
-                     // 失敗理由の詳細を表示
-                     console.log(data); // デバッグ用にコンソール出力
-                     let detail = "AIからの応答が空でした。";
                      
-                     if (data.promptFeedback && data.promptFeedback.blockReason) {
-                        detail = `安全基準によりブロックされました (${data.promptFeedback.blockReason})`;
-                     } else if (data.candidates && data.candidates[0] && data.candidates[0].finishReason) {
-                        detail = `終了理由: ${data.candidates[0].finishReason}`;
+                     // 録音が終わっていて、これが最後の処理だった場合
+                     if (!isRecording) {
+                         updateStatus("すべての文字起こしが完了しました。", false);
+                     } else {
+                         updateStatus(`データ #${currentChunkIndex} の解析完了。録音継続中...`, false);
                      }
-                     
-                     throw new Error(`文字起こしに失敗しました: ${detail}`);
+
+                } else {
+                     console.warn(`Chunk #${currentChunkIndex} empty response.`);
                 }
-                // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
             } catch (error) {
-                updateStatus(`エラー: ${error.message}`, true);
-                console.error(error);
+                console.error(`Error processing chunk #${currentChunkIndex}:`, error);
+                const textArea = document.getElementById('transcriptionText');
+                textArea.value += `\n\n[エラー: データ #${currentChunkIndex} の処理に失敗しました]`;
             }
         }
 
-        // Geminiで議事録作成
+        // 議事録作成
         async function generateMinutes() {
             const text = document.getElementById('transcriptionText').value;
             const apiKey = document.getElementById('apiKey').value;
             
-            // 圧縮率の取得
+            // 圧縮率取得
             const compressionElements = document.getElementsByName('compression');
             let compressionRate = 'medium';
             for (const el of compressionElements) {
@@ -308,144 +345,8 @@ ${customPromptText}
 
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${apiKey}`;
 
-            // 圧縮率に応じた指示の切り替え
             let compressionInstruction = "";
             if (compressionRate === "high") {
                 compressionInstruction = `
                 【重要：圧縮率「高」】
                 ・元の文章量から約95%を削減し、極めて簡潔にまとめてください。
-                ・詳細な経緯は省き、最終的な「決定事項」と「重要な結論」のみを抽出してください。
-                ・文章の意味や重要な事実関係が失われない範囲で、可能な限り短くしてください。`;
-            } else if (compressionRate === "medium") {
-                compressionInstruction = `
-                【重要：圧縮率「中」】
-                ・元の文章量から約70%を削減し、標準的な議事録の長さにしてください。
-                ・議論の流れが分かる程度に要約しつつ、冗長な部分はカットしてください。
-                ・文章の意味が失われないように注意してください。`;
-            } else { // low
-                compressionInstruction = `
-                【重要：圧縮率「低」】
-                ・元の文章量から約30%のみを削減し、詳細な議事録を作成してください。
-                ・「あー」「えっと」などの不要な言葉や、意味のない繰り返しのみを削除してください。
-                ・細かいニュアンスや発言の経緯はできるだけ残してください。
-                ・文章の意味が失われないように注意してください。`;
-            }
-
-            const prompt = `
-            以下の会議の文字起こしテキストをもとに、簡潔な議事録を作成してください。
-            
-            ${compressionInstruction}
-
-            マークダウン形式を使わず、プレーンテキストで見やすく出力してください。
-            挨拶や返事は不要です。
-
-            【形式】
-            ・議題
-            ・決定事項
-            ・ネクストアクション
-
-            【テキスト】
-            ${text}
-            `;
-
-            try {
-                const payload = {
-                    contents: [{
-                        parts: [{ text: prompt }]
-                    }],
-                    // 議事録生成時も安全設定を緩和
-                    safetySettings: [
-                        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-                    ]
-                };
-
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                const data = await response.json();
-
-                if (data.error) {
-                    throw new Error(data.error.message);
-                }
-
-                // 議事録生成結果の抽出
-                if (data.candidates && 
-                    data.candidates.length > 0 && 
-                    data.candidates[0].content && 
-                    data.candidates[0].content.parts && 
-                    data.candidates[0].content.parts.length > 0) {
-                        
-                    const summary = data.candidates[0].content.parts[0].text;
-                    document.getElementById('minutesText').value = summary;
-                    document.getElementById('dlMinutesBtn').disabled = false;
-                    updateStatus("議事録作成完了！", false);
-                } else {
-                     let detail = "AIからの応答が空でした。";
-                     if (data.promptFeedback && data.promptFeedback.blockReason) {
-                        detail = `ブロックされました (${data.promptFeedback.blockReason})`;
-                     }
-                     throw new Error(`議事録作成に失敗しました: ${detail}`);
-                }
-
-            } catch (error) {
-                updateStatus(`エラー: ${error.message}`, true);
-            } finally {
-                document.getElementById('summarizeBtn').disabled = false;
-            }
-        }
-
-        function downloadText(elementId, filePrefix) {
-            const text = document.getElementById(elementId).value;
-            if (!text) {
-                alert("ダウンロードする内容がありません。");
-                return;
-            }
-
-            const now = new Date();
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const seconds = String(now.getSeconds()).padStart(2, '0');
-            const timestamp = `${year}${month}${day}_${hours}${minutes}${seconds}`;
-
-            const filename = `${filePrefix}_${timestamp}.txt`;
-
-            const blob = new Blob([text], { type: "text/plain" });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = filename;
-            link.click();
-            URL.revokeObjectURL(link.href);
-        }
-
-        function blobToBase64(blob) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
-        }
-
-        function updateStatus(msg, isProcessing) {
-            const el = document.getElementById('status');
-            el.innerText = msg;
-            el.className = isProcessing ? '' : (msg.includes('エラー') ? 'error' : '');
-            el.style.color = isProcessing ? '#4285f4' : (msg.includes('エラー') ? '#ea4335' : '#333');
-        }
-
-        function toggleButtons(isRecording) {
-            document.getElementById('startBtn').disabled = isRecording;
-            document.getElementById('stopBtn').disabled = !isRecording;
-        }
-    </script>
-</body>
-</html>

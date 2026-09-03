@@ -61,7 +61,7 @@
         <button id="stopBtn" class="btn-red" onclick="stopRecording()" disabled>停止</button>
         <p id="status">待機中...</p>
         <!-- ▼▼▼ 修正箇所：文言を削除 ▼▼▼ -->
-        <p class="note">※約5分ごとに自動で区切って文字起こしを行います。</p>
+        <p class="note">※最初の1回は約30秒、以降は約5分ごとに自動で区切って文字起こしを行います。</p>
         <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
     </div>
 
@@ -71,6 +71,13 @@
         <p class="note">録音中もここに順次テキストが追加されていきます。</p>
         <textarea id="transcriptionText" placeholder="ここに文字起こし結果が順次表示されます..."></textarea>
         <br><br>
+
+        <button id="dlTransBtn" class="btn-orange" onclick="downloadText('transcriptionText', 'transcription')" disabled>文字起こしをダウンロード</button>
+    </div>
+
+    <!-- 3. 結果 -->
+    <div class="section">
+        <h2>3. 議事録出力</h2>
 
         <label>議事録の要約方向性（追加指示）:</label>
         <textarea id="summaryPrompt" class="prompt-area" placeholder="例：決定事項とネクストアクションを中心にまとめてください。金額や日付などの数値は省略せず残してください。"></textarea>
@@ -89,19 +96,16 @@
         </div>
 
         <button id="summarizeBtn" class="btn-green" onclick="generateMinutes()" disabled>この内容で議事録を作成</button>
-        <button id="dlTransBtn" class="btn-orange" onclick="downloadText('transcriptionText', 'transcription')" disabled>文字起こしをダウンロード</button>
-    </div>
+        <br><br>
 
-    <!-- 3. 結果 -->
-    <div class="section">
-        <h2>3. 議事録出力</h2>
         <textarea id="minutesText" placeholder="ここに議事録が出力されます..." readonly></textarea>
         <br><br>
         <button id="dlMinutesBtn" class="btn-orange" onclick="downloadText('minutesText', 'minutes')" disabled>議事録をダウンロード</button>
     </div>
 
     <script>
-        // 設定：5分 (300000ms)
+        // 設定：初回のみ30秒（動作確認用）、以降は5分 (300000ms)
+        const FIRST_CHUNK_INTERVAL_MS = 30000;
         const CHUNK_INTERVAL_MS = 300000;
         const MODEL_NAME = "gemini-3.8-flash";
 
@@ -207,12 +211,13 @@
             // 4. 更新
             activeRecorder = newRecorder;
 
-            // 5. 次のタイマー
+            // 5. 次のタイマー（初回のみ短く、動作確認しやすくする）
+            const nextInterval = (currentCountForThisRecorder === 1) ? FIRST_CHUNK_INTERVAL_MS : CHUNK_INTERVAL_MS;
             chunkTimer = setTimeout(() => {
                 if (isRecording) {
                     rotateRecorder();
                 }
-            }, CHUNK_INTERVAL_MS);
+            }, nextInterval);
         }
 
         // 停止ボタン処理
@@ -315,6 +320,8 @@ ${customPromptText}
                      
                      if (!isRecording) {
                          updateStatus("すべての文字起こしが完了しました。", false);
+                     } else if (currentChunkIndex === 1) {
+                         updateStatus("✅ 文字起こしが正常に動作しています。このまま録音を続けてください。（次は約5分後に処理されます）", false);
                      } else {
                          updateStatus(`データ #${currentChunkIndex} の解析完了。録音継続中...`, false);
                      }

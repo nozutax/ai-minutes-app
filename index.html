@@ -50,8 +50,8 @@
     <div class="section">
         <h2>1. 録音</h2>
         
-        <label>文字起こしへの追加指示（プロンプト）:</label>
-        <textarea id="customPrompt" class="prompt-area" placeholder="例：専門用語の「〇〇」はカタカナ表記にしてください。話者が複数の場合は「Aさん」「Bさん」と分けてください。"></textarea>
+        <label>文字起こしへの追加指示（会議の背景・分野、専門用語、表記ルールなど）:</label>
+        <textarea id="customPrompt" class="prompt-area" placeholder="例：この録音は医療法人の経営会議です。医療・経営関連の専門用語を優先して認識してください。話者が複数の場合は「Aさん」「Bさん」と分けてください。"></textarea>
         <label class="checkbox-label">
             <input type="checkbox" id="savePromptCheckbox"> このプロンプトを次回も使用する
         </label>
@@ -61,7 +61,7 @@
         <button id="stopBtn" class="btn-red" onclick="stopRecording()" disabled>停止</button>
         <p id="status">待機中...</p>
         <!-- ▼▼▼ 修正箇所：文言を削除 ▼▼▼ -->
-        <p class="note">※約3分ごとに自動で区切って文字起こしを行います。</p>
+        <p class="note">※約5分ごとに自動で区切って文字起こしを行います。</p>
         <!-- ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ -->
     </div>
 
@@ -72,13 +72,16 @@
         <textarea id="transcriptionText" placeholder="ここに文字起こし結果が順次表示されます..."></textarea>
         <br><br>
 
+        <label>議事録の要約方向性（追加指示）:</label>
+        <textarea id="summaryPrompt" class="prompt-area" placeholder="例：決定事項とネクストアクションを中心にまとめてください。金額や日付などの数値は省略せず残してください。"></textarea>
+
         <div class="compression-options">
             <label style="margin-bottom:8px;">議事録の圧縮率（要約レベル）:</label>
             <label class="radio-label">
-                <input type="radio" name="compression" value="high"> 高 (約95%カット)
+                <input type="radio" name="compression" value="high"> 高 (約90%カット)
             </label>
             <label class="radio-label">
-                <input type="radio" name="compression" value="medium" checked> 中 (約70%カット)
+                <input type="radio" name="compression" value="medium" checked> 中 (約50%カット)
             </label>
             <label class="radio-label">
                 <input type="radio" name="compression" value="low"> 低 (約30%カット)
@@ -98,15 +101,17 @@
     </div>
 
     <script>
-        // 設定：3分 (180000ms)
-        const CHUNK_INTERVAL_MS = 180000; 
-        const MODEL_NAME = "gemini-3.6-flash";
+        // 設定：5分 (300000ms)
+        const CHUNK_INTERVAL_MS = 300000;
+        const MODEL_NAME = "gemini-3.8-flash";
 
         let activeRecorder = null; // 現在稼働中のレコーダー
-        let stream; 
-        let isRecording = false; 
-        let chunkTimer = null;   
-        let chunkCount = 0;      
+        let stream;
+        let isRecording = false;
+        let chunkTimer = null;
+        let chunkCount = 0;
+        let processingQueue = Promise.resolve(); // チャンクを録音順に直列処理するためのキュー
+        let previousChunkTail = ""; // 直前チャンクの文字起こし末尾（次チャンクへの文脈参考）
 
         window.addEventListener('load', () => {
             const savedKey = localStorage.getItem('gemini_api_key');
@@ -186,7 +191,8 @@
             
             newRecorder.onstop = () => {
                 const audioBlob = new Blob(localChunks, { type: 'audio/webm' });
-                processChunkWithGemini(audioBlob, currentCountForThisRecorder);
+                // 録音順に直列実行することで、表示順の一致と前チャンクの文脈連携を保証する
+                processingQueue = processingQueue.then(() => processChunkWithGemini(audioBlob, currentCountForThisRecorder));
             };
 
             // 2. 新しいレコーダーを開始
@@ -243,12 +249,15 @@
                     contents: [{
                         parts: [
                             { text: `あなたは熟練した文字起こし担当者です。
-添付の音声データは、長い会議を3分ごとに区切ったうちの「パート${currentChunkIndex}」です。
+添付の音声データは、長い会議を5分ごとに区切ったうちの「パート${currentChunkIndex}」です。
 
 【重要：音切れへの対応】
 ・ファイルが区切られているため、冒頭や末尾で単語が途切れている場合があります。
 ・そのような場合でも、**聞こえた音を勝手に省略せず、そのまま書き起こしてください**。文脈で補完できる場合は補完しても構いません。
-
+${previousChunkTail ? `
+【直前パートの末尾（文脈参考・繰り返して書き起こさないこと）】
+${previousChunkTail}
+` : ""}
 【ユーザーからの追加指示】
 ${customPromptText}
 
@@ -270,7 +279,10 @@ ${customPromptText}
                         { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
                         { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
                         { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-                    ]
+                    ],
+                    generationConfig: {
+                        temperature: 0.1
+                    }
                 };
 
                 const response = await fetch(url, {
@@ -288,7 +300,8 @@ ${customPromptText}
                 if (data.candidates && data.candidates[0].content && data.candidates[0].content.parts) {
                      let transcript = data.candidates[0].content.parts[0].text;
                      transcript = transcript.trim();
-                     
+                     previousChunkTail = transcript.slice(-150);
+
                      const textArea = document.getElementById('transcriptionText');
                      if (textArea.value) {
                          textArea.value += "\n" + transcript;
@@ -321,7 +334,8 @@ ${customPromptText}
         async function generateMinutes() {
             const text = document.getElementById('transcriptionText').value;
             const apiKey = document.getElementById('apiKey').value;
-            
+            const summaryPromptText = document.getElementById('summaryPrompt').value;
+
             const compressionElements = document.getElementsByName('compression');
             let compressionRate = 'medium';
             for (const el of compressionElements) {
@@ -342,17 +356,17 @@ ${customPromptText}
             if (compressionRate === "high") {
                 compressionInstruction = `
                 【重要：圧縮率「高」】
-                ・元の文章量から約95%を削減し、極めて簡潔にまとめてください。
+                ・元の文章量から約90%を削減し、極めて簡潔にまとめてください。
                 ・詳細な経緯は省き、最終的な「決定事項」と「重要な結論」のみを抽出してください。`;
             } else if (compressionRate === "medium") {
                 compressionInstruction = `
                 【重要：圧縮率「中」】
-                ・元の文章量から約70%を削減し、標準的な議事録の長さにしてください。
+                ・元の文章量から約50%を削減し、標準的な議事録の長さにしてください。
                 ・議論の流れが分かる程度に要約してください。`;
             } else {
                 compressionInstruction = `
                 【重要：圧縮率「低」】
-                ・元の文章量から約30%のみを削減し、詳細な議事録を作成してください。
+                ・元の文章量から約30%を削減し、詳細な議事録を作成してください。
                 ・不要な言葉や繰り返しのみを削除してください。`;
             }
 
@@ -360,6 +374,9 @@ ${customPromptText}
             以下の会議の文字起こしテキスト（分割して認識されたものの結合）をもとに、整合性の取れた簡潔な議事録を作成してください。
             
             ${compressionInstruction}
+            ${summaryPromptText ? `
+            【要約の方向性（ユーザー指定）】
+            ${summaryPromptText}` : ""}
 
             マークダウン形式を使わず、プレーンテキストで見やすく出力してください。
             挨拶や返事は不要です。
